@@ -21,28 +21,133 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
+// Achievements definition
+const ACHIEVEMENTS = {
+    firstBlood: { id: 'firstBlood', name: 'First Blood', desc: 'Hit your first Oni', icon: '👹', unlocked: false },
+    combo5: { id: 'combo5', name: 'Combo Master', desc: 'Get a 5x combo', icon: '🔥', unlocked: false },
+    combo10: { id: 'combo10', name: 'Combo Legend', desc: 'Get a 10x combo', icon: '💥', unlocked: false },
+    score100: { id: 'score100', name: 'Century', desc: 'Score 100 points', icon: '💯', unlocked: false },
+    score500: { id: 'score500', name: 'High Scorer', desc: 'Score 500 points', icon: '⭐', unlocked: false },
+    score1000: { id: 'score1000', name: 'Oni Slayer', desc: 'Score 1000 points', icon: '👑', unlocked: false },
+    redOni: { id: 'redOni', name: 'Red Hunter', desc: 'Hit 5 red Oni in one game', icon: '🔴', unlocked: false },
+    perfectCombo: { id: 'perfectCombo', name: 'No Miss', desc: 'Finish with 10+ combo', icon: '✨', unlocked: false }
+};
+
+// Load saved data
+function loadSaveData() {
+    const saved = localStorage.getItem('oniBlasterSave');
+    if (saved) {
+        const data = JSON.parse(saved);
+        return {
+            highScore: data.highScore || 0,
+            achievements: data.achievements || {}
+        };
+    }
+    return { highScore: 0, achievements: {} };
+}
+
+// Save data
+function saveData() {
+    const data = {
+        highScore: game.highScore,
+        achievements: game.achievements
+    };
+    localStorage.setItem('oniBlasterSave', JSON.stringify(data));
+}
+
 // Game state
+const saveData_loaded = loadSaveData();
 const game = {
     score: 0,
+    highScore: saveData_loaded.highScore,
     timeLeft: 10,
     isPlaying: false,
     beans: [],
     onis: [],
     particles: [],
     scorePopups: [],
+    achievementPopups: [],
     lastTime: 0,
     throwCooldown: 0,
-    isHolding: false
+    isHolding: false,
+    // Combo system
+    combo: 0,
+    maxCombo: 0,
+    comboTimer: 0,
+    comboTimeout: 1.5, // seconds to maintain combo
+    // Level system
+    level: 1,
+    redOniHits: 0,
+    // Achievements
+    achievements: saveData_loaded.achievements
 };
+
+// Achievement popup class
+class AchievementPopup {
+    constructor(achievement) {
+        this.achievement = achievement;
+        this.life = 3; // Show for 3 seconds
+        this.y = -80;
+        this.targetY = 60;
+    }
+
+    update(dt) {
+        this.life -= dt;
+        // Slide in animation
+        if (this.y < this.targetY) {
+            this.y += 200 * dt;
+            if (this.y > this.targetY) this.y = this.targetY;
+        }
+        // Slide out when almost done
+        if (this.life < 0.5) {
+            this.y -= 200 * dt;
+        }
+    }
+
+    draw() {
+        const width = 250;
+        const height = 60;
+        const x = (canvas.width - width) / 2;
+
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, this.life * 2);
+
+        // Background
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.roundRect(x, this.y, width, height, 10);
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = '#ffd700';
+        ctx.lineWidth = 2;
+        ctx.roundRect(x, this.y, width, height, 10);
+        ctx.stroke();
+
+        // Icon
+        ctx.font = '30px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(this.achievement.icon, x + 10, this.y + 42);
+
+        // Text
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 14px Arial';
+        ctx.fillText('Achievement Unlocked!', x + 50, this.y + 22);
+        ctx.fillStyle = 'white';
+        ctx.font = '16px Arial';
+        ctx.fillText(this.achievement.name, x + 50, this.y + 45);
+
+        ctx.restore();
+    }
+}
 
 // Oni class
 class Oni {
-    constructor() {
+    constructor(speedMultiplier = 1) {
         this.size = 60 + Math.random() * 30;
         this.x = Math.random() * (canvas.width - this.size * 2) + this.size;
         this.y = Math.random() * (canvas.height - this.size * 2 - 100) + this.size + 50;
-        this.vx = (Math.random() - 0.5) * 3;
-        this.vy = (Math.random() - 0.5) * 2;
+        this.vx = (Math.random() - 0.5) * 3 * speedMultiplier;
+        this.vy = (Math.random() - 0.5) * 2 * speedMultiplier;
         this.color = Math.random() > 0.7 ? '#ff4444' : '#4a90d9';
         this.points = this.color === '#ff4444' ? 30 : 10;
         this.bounceTimer = 0;
@@ -156,6 +261,10 @@ class Bean {
         // Remove if off screen
         if (this.x < 0 || this.x > canvas.width || this.y < 0 || this.y > canvas.height) {
             this.alive = false;
+            // Reset combo on miss
+            if (game.combo > 0) {
+                game.combo = 0;
+            }
         }
     }
 
@@ -207,10 +316,11 @@ class Particle {
 
 // Score popup class
 class ScorePopup {
-    constructor(x, y, score) {
+    constructor(x, y, score, combo = 0) {
         this.x = x;
         this.y = y;
         this.score = score;
+        this.combo = combo;
         this.life = 1;
         this.vy = -2;
     }
@@ -222,12 +332,59 @@ class ScorePopup {
 
     draw() {
         ctx.globalAlpha = this.life;
-        ctx.fillStyle = this.score >= 30 ? '#ff6b6b' : '#ffd700';
-        ctx.font = `bold ${24 + this.score}px Arial`;
+
+        // Score text
+        const comboColor = this.combo >= 10 ? '#ff00ff' : this.combo >= 5 ? '#ff6b6b' : '#ffd700';
+        ctx.fillStyle = comboColor;
+        ctx.font = `bold ${24 + Math.min(this.combo * 2, 20)}px Arial`;
         ctx.textAlign = 'center';
         ctx.fillText(`+${this.score}`, this.x, this.y);
+
+        // Combo text
+        if (this.combo > 1) {
+            ctx.font = 'bold 16px Arial';
+            ctx.fillStyle = comboColor;
+            ctx.fillText(`${this.combo}x COMBO!`, this.x, this.y + 20);
+        }
+
         ctx.globalAlpha = 1;
     }
+}
+
+// Unlock achievement
+function unlockAchievement(id) {
+    if (game.achievements[id]) return; // Already unlocked
+
+    game.achievements[id] = true;
+    ACHIEVEMENTS[id].unlocked = true;
+    game.achievementPopups.push(new AchievementPopup(ACHIEVEMENTS[id]));
+    saveData();
+}
+
+// Check achievements
+function checkAchievements() {
+    // First hit
+    if (game.score > 0) unlockAchievement('firstBlood');
+
+    // Combo achievements
+    if (game.combo >= 5) unlockAchievement('combo5');
+    if (game.combo >= 10) unlockAchievement('combo10');
+
+    // Score achievements
+    if (game.score >= 100) unlockAchievement('score100');
+    if (game.score >= 500) unlockAchievement('score500');
+    if (game.score >= 1000) unlockAchievement('score1000');
+
+    // Red oni achievement
+    if (game.redOniHits >= 5) unlockAchievement('redOni');
+}
+
+// Get combo multiplier
+function getComboMultiplier() {
+    if (game.combo < 3) return 1;
+    if (game.combo < 5) return 1.5;
+    if (game.combo < 10) return 2;
+    return 3;
 }
 
 // Initialize game
@@ -239,10 +396,15 @@ function initGame() {
     game.particles = [];
     game.scorePopups = [];
     game.throwCooldown = 0;
+    game.combo = 0;
+    game.maxCombo = 0;
+    game.comboTimer = 0;
+    game.level = 1;
+    game.redOniHits = 0;
 
     // Spawn initial onis
     for (let i = 0; i < 3; i++) {
-        game.onis.push(new Oni());
+        game.onis.push(new Oni(1));
     }
 
     updateUI();
@@ -261,6 +423,12 @@ function startGame() {
     game.timerInterval = setInterval(() => {
         if (game.isPlaying) {
             game.timeLeft--;
+
+            // Level up every 3 seconds
+            if (game.timeLeft === 7 || game.timeLeft === 4 || game.timeLeft === 1) {
+                levelUp();
+            }
+
             updateUI();
             if (game.timeLeft <= 0) {
                 endGame();
@@ -269,11 +437,47 @@ function startGame() {
     }, 1000);
 }
 
+// Level up - add more onis and increase speed
+function levelUp() {
+    game.level++;
+    const speedMultiplier = 1 + (game.level - 1) * 0.3;
+
+    // Add a new oni
+    game.onis.push(new Oni(speedMultiplier));
+
+    // Speed up existing onis
+    game.onis.forEach(oni => {
+        oni.vx *= 1.2;
+        oni.vy *= 1.2;
+    });
+}
+
 // End game
 function endGame() {
     game.isPlaying = false;
     clearInterval(game.timerInterval);
+
+    // Check perfect combo achievement
+    if (game.combo >= 10) unlockAchievement('perfectCombo');
+
+    // Update high score
+    const isNewHighScore = game.score > game.highScore;
+    if (isNewHighScore) {
+        game.highScore = game.score;
+        saveData();
+    }
+
+    // Update result screen
     document.getElementById('final-score').textContent = game.score;
+    document.getElementById('high-score').textContent = `Best: ${game.highScore}`;
+    document.getElementById('max-combo').textContent = `Max Combo: ${game.maxCombo}x`;
+
+    if (isNewHighScore) {
+        document.getElementById('new-record').classList.remove('hidden');
+    } else {
+        document.getElementById('new-record').classList.add('hidden');
+    }
+
     document.getElementById('result-screen').classList.remove('hidden');
 }
 
@@ -281,6 +485,8 @@ function endGame() {
 function updateUI() {
     document.getElementById('score').textContent = `Score: ${game.score}`;
     document.getElementById('timer').textContent = `Time: ${game.timeLeft}`;
+    document.getElementById('combo').textContent = game.combo > 1 ? `${game.combo}x` : '';
+    document.getElementById('level').textContent = `Lv.${game.level}`;
 }
 
 // Throw bean
@@ -307,22 +513,42 @@ function checkCollisions() {
                 bean.alive = false;
                 oni.hit = true;
                 oni.hitTimer = 0.2;
-                game.score += oni.points;
+
+                // Combo system
+                game.combo++;
+                game.comboTimer = game.comboTimeout;
+                if (game.combo > game.maxCombo) game.maxCombo = game.combo;
+
+                // Calculate score with combo multiplier
+                const multiplier = getComboMultiplier();
+                const points = Math.floor(oni.points * multiplier);
+                game.score += points;
+
+                // Track red oni hits
+                if (oni.color === '#ff4444') {
+                    game.redOniHits++;
+                }
+
+                // Check achievements
+                checkAchievements();
+
                 updateUI();
 
                 // Create particles
-                for (let i = 0; i < 10; i++) {
+                const particleCount = game.combo >= 5 ? 20 : 10;
+                for (let i = 0; i < particleCount; i++) {
                     game.particles.push(new Particle(bean.x, bean.y, oni.color));
                 }
 
-                // Create score popup
-                game.scorePopups.push(new ScorePopup(oni.x, oni.y - oni.size, oni.points));
+                // Create score popup with combo
+                game.scorePopups.push(new ScorePopup(oni.x, oni.y - oni.size, points, game.combo));
 
-                // Respawn oni at new position
+                // Respawn oni at new position with current level speed
+                const speedMultiplier = 1 + (game.level - 1) * 0.3;
                 oni.x = Math.random() * (canvas.width - oni.size * 2) + oni.size;
                 oni.y = Math.random() * (canvas.height - oni.size * 2 - 100) + oni.size + 50;
-                oni.vx = (Math.random() - 0.5) * 3;
-                oni.vy = (Math.random() - 0.5) * 2;
+                oni.vx = (Math.random() - 0.5) * 3 * speedMultiplier;
+                oni.vy = (Math.random() - 0.5) * 2 * speedMultiplier;
 
                 break;
             }
@@ -340,6 +566,15 @@ function gameLoop(timestamp) {
     // Update cooldown
     game.throwCooldown = Math.max(0, game.throwCooldown - dt * 1000);
 
+    // Update combo timer
+    if (game.combo > 0) {
+        game.comboTimer -= dt;
+        if (game.comboTimer <= 0) {
+            game.combo = 0;
+            updateUI();
+        }
+    }
+
     // Auto-throw when holding
     if (game.isHolding && game.throwCooldown <= 0) {
         throwBean(game.targetX || canvas.width / 2, game.targetY || canvas.height / 2);
@@ -350,6 +585,7 @@ function gameLoop(timestamp) {
     game.beans.forEach(bean => bean.update());
     game.particles.forEach(p => p.update());
     game.scorePopups.forEach(p => p.update());
+    game.achievementPopups.forEach(p => p.update(dt));
 
     // Check collisions
     checkCollisions();
@@ -358,11 +594,37 @@ function gameLoop(timestamp) {
     game.beans = game.beans.filter(b => b.alive);
     game.particles = game.particles.filter(p => p.life > 0);
     game.scorePopups = game.scorePopups.filter(p => p.life > 0);
+    game.achievementPopups = game.achievementPopups.filter(p => p.life > 0);
 
     // Draw
     draw();
 
     requestAnimationFrame(gameLoop);
+}
+
+// Draw combo meter
+function drawComboMeter() {
+    if (game.combo < 2) return;
+
+    const meterWidth = 100;
+    const meterHeight = 8;
+    const x = canvas.width - meterWidth - 10;
+    const y = 35;
+
+    // Background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(x, y, meterWidth, meterHeight);
+
+    // Fill based on combo timer
+    const fillPercent = game.comboTimer / game.comboTimeout;
+    const comboColor = game.combo >= 10 ? '#ff00ff' : game.combo >= 5 ? '#ff6b6b' : '#ffd700';
+    ctx.fillStyle = comboColor;
+    ctx.fillRect(x, y, meterWidth * fillPercent, meterHeight);
+
+    // Border
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, meterWidth, meterHeight);
 }
 
 // Draw everything
@@ -393,6 +655,12 @@ function draw() {
     ctx.beginPath();
     ctx.arc(canvas.width / 2 - 3, canvas.height - 23, 5, 0, Math.PI * 2);
     ctx.fill();
+
+    // Draw combo meter
+    drawComboMeter();
+
+    // Draw achievement popups
+    game.achievementPopups.forEach(p => p.draw());
 }
 
 // Event handlers
@@ -481,6 +749,9 @@ document.addEventListener('keyup', (e) => {
 // Button events
 document.getElementById('start-btn').addEventListener('click', startGame);
 document.getElementById('retry-btn').addEventListener('click', startGame);
+
+// Update high score display on start screen
+document.getElementById('best-score').textContent = game.highScore > 0 ? `Best: ${game.highScore}` : '';
 
 // Initial draw
 draw();
