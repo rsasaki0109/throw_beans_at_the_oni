@@ -3,8 +3,13 @@
 鬼退治！豆まきバトル - 10秒間で鬼に豆を投げまくれ！
 
 ![Roblox](https://img.shields.io/badge/Platform-Roblox-red)
+![Web](https://img.shields.io/badge/Platform-Web-green)
 ![Lua](https://img.shields.io/badge/Language-Lua-blue)
 ![Rojo](https://img.shields.io/badge/Build-Rojo-orange)
+
+## Play Online
+
+**[Play Now on GitHub Pages](https://rsasaki0109.github.io/throw_beans_at_the_oni/)**
 
 ## Overview
 
@@ -28,6 +33,8 @@ A Japanese Setsubun festival mini-game for Roblox. Throw beans at the Oni in 10 
 
 ```
 throw_beans_at_the_oni/
+├── index.html              # Web version (GitHub Pages)
+├── game.js                 # Web game logic
 ├── default.project.json    # Rojo configuration
 ├── src/
 │   ├── client/             # Client scripts
