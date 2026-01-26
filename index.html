@@ -164,13 +164,17 @@
         </div>
         <div id="start-screen">
             <h2>Bean Throwing Battle</h2>
-            <p>10 seconds to defeat the Oni!</p>
+            <p>Survive and defeat the Oni!</p>
+            <p style="color: #ff6b6b; margin-top: 10px;">Watch out for their clubs!</p>
             <button class="btn" id="start-btn">START</button>
-            <p class="instructions">Click/Tap or Hold Space to throw beans</p>
+            <p class="instructions">
+                <strong>PC:</strong> WASD/Arrows to move, Click to throw<br>
+                <strong>Mobile:</strong> Left side to move, Right side to throw
+            </p>
             <p id="best-score"></p>
         </div>
         <div id="result-screen" class="hidden">
-            <h2>Time Up!</h2>
+            <h2 id="game-over-reason">Time Up!</h2>
             <div id="new-record" class="hidden">NEW RECORD!</div>
             <p>Your Score:</p>
             <div class="score" id="final-score">0</div>
