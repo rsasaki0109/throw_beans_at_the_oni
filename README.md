@@ -11,6 +11,8 @@
 
 **[Play Now on GitHub Pages](https://rsasaki0109.github.io/throw_beans_at_the_oni/)**
 
+![Game Screenshot](screenshot.png)
+
 ## Overview
 
 A Japanese Setsubun festival mini-game for Roblox. Throw beans at the Oni in 10 seconds and compete for the highest score!
