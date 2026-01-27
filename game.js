@@ -64,6 +64,7 @@ const game = {
     isPlaying: false,
     beans: [],
     onis: [],
+    clubs: [], // 鬼の金棒
     particles: [],
     scorePopups: [],
     achievementPopups: [],
@@ -79,7 +80,32 @@ const game = {
     level: 1,
     redOniHits: 0,
     // Achievements
-    achievements: saveData_loaded.achievements
+    achievements: saveData_loaded.achievements,
+    // Player state
+    player: {
+        x: 0,
+        y: 0,
+        hp: 3,
+        maxHp: 3,
+        speed: 200,
+        size: 20,
+        invincible: 0 // 無敵時間
+    },
+    // Input state for movement
+    keys: {
+        up: false,
+        down: false,
+        left: false,
+        right: false
+    },
+    // Virtual joystick for mobile
+    joystick: {
+        active: false,
+        startX: 0,
+        startY: 0,
+        currentX: 0,
+        currentY: 0
+    }
 };
 
 // Achievement popup class
@@ -140,12 +166,68 @@ class AchievementPopup {
     }
 }
 
+// Club (金棒) class - thrown by Oni
+class Club {
+    constructor(x, y, targetX, targetY) {
+        this.x = x;
+        this.y = y;
+        const angle = Math.atan2(targetY - y, targetX - x);
+        const speed = 6;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.angle = angle;
+        this.size = 12;
+        this.alive = true;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.angle += 0.2; // 回転
+
+        // Remove if off screen
+        if (this.x < -50 || this.x > canvas.width + 50 ||
+            this.y < -50 || this.y > canvas.height + 50) {
+            this.alive = false;
+        }
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.angle);
+
+        // 金棒の棒部分
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(-20, -4, 40, 8);
+
+        // 金棒の先端（トゲトゲ部分）
+        ctx.fillStyle = '#444';
+        ctx.beginPath();
+        ctx.arc(15, 0, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // トゲ
+        ctx.fillStyle = '#666';
+        for (let i = 0; i < 6; i++) {
+            const spikeAngle = (i / 6) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(15 + Math.cos(spikeAngle) * 6, Math.sin(spikeAngle) * 6);
+            ctx.lineTo(15 + Math.cos(spikeAngle) * 12, Math.sin(spikeAngle) * 12);
+            ctx.lineTo(15 + Math.cos(spikeAngle + 0.3) * 6, Math.sin(spikeAngle + 0.3) * 6);
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
+}
+
 // Oni class
 class Oni {
     constructor(speedMultiplier = 1) {
-        this.size = 60 + Math.random() * 30;
+        this.size = 40 + Math.random() * 20; // サイズ縮小: 60-90 → 40-60
         this.x = Math.random() * (canvas.width - this.size * 2) + this.size;
-        this.y = Math.random() * (canvas.height - this.size * 2 - 100) + this.size + 50;
+        this.y = Math.random() * (canvas.height - this.size * 2 - 150) + this.size + 50;
         this.vx = (Math.random() - 0.5) * 3 * speedMultiplier;
         this.vy = (Math.random() - 0.5) * 2 * speedMultiplier;
         this.color = Math.random() > 0.7 ? '#ff4444' : '#4a90d9';
@@ -153,6 +235,7 @@ class Oni {
         this.bounceTimer = 0;
         this.hit = false;
         this.hitTimer = 0;
+        this.throwCooldown = 2 + Math.random() * 2; // 金棒投げるクールダウン
     }
 
     update(dt) {
@@ -170,10 +253,22 @@ class Oni {
             this.vx *= -1;
             this.x = Math.max(this.size, Math.min(canvas.width - this.size, this.x));
         }
-        if (this.y < this.size + 50 || this.y > canvas.height - this.size) {
+        if (this.y < this.size + 50 || this.y > canvas.height - this.size - 100) {
             this.vy *= -1;
-            this.y = Math.max(this.size + 50, Math.min(canvas.height - this.size, this.y));
+            this.y = Math.max(this.size + 50, Math.min(canvas.height - this.size - 100, this.y));
         }
+
+        // 金棒を投げる
+        this.throwCooldown -= dt;
+        if (this.throwCooldown <= 0 && game.isPlaying) {
+            this.throwClub();
+            this.throwCooldown = 2.5 + Math.random() * 2; // 次の投げるまでの時間
+        }
+    }
+
+    throwClub() {
+        // プレイヤーに向かって金棒を投げる
+        game.clubs.push(new Club(this.x, this.y, game.player.x, game.player.y));
     }
 
     draw() {
@@ -393,6 +488,7 @@ function initGame() {
     game.timeLeft = 10;
     game.beans = [];
     game.onis = [];
+    game.clubs = [];
     game.particles = [];
     game.scorePopups = [];
     game.throwCooldown = 0;
@@ -401,6 +497,16 @@ function initGame() {
     game.comboTimer = 0;
     game.level = 1;
     game.redOniHits = 0;
+
+    // Initialize player
+    game.player.x = canvas.width / 2;
+    game.player.y = canvas.height - 60;
+    game.player.hp = game.player.maxHp;
+    game.player.invincible = 0;
+
+    // Reset input state
+    game.keys = { up: false, down: false, left: false, right: false };
+    game.joystick.active = false;
 
     // Spawn initial onis
     for (let i = 0; i < 3; i++) {
@@ -472,6 +578,18 @@ function endGame() {
     document.getElementById('high-score').textContent = `Best: ${game.highScore}`;
     document.getElementById('max-combo').textContent = `Max Combo: ${game.maxCombo}x`;
 
+    // Show game over reason
+    const gameOverReason = document.getElementById('game-over-reason');
+    if (gameOverReason) {
+        if (game.player.hp <= 0) {
+            gameOverReason.textContent = 'You were knocked out!';
+            gameOverReason.style.color = '#ff4444';
+        } else {
+            gameOverReason.textContent = 'Time Up!';
+            gameOverReason.style.color = '#ffd700';
+        }
+    }
+
     if (isNewHighScore) {
         document.getElementById('new-record').classList.remove('hidden');
     } else {
@@ -493,14 +611,94 @@ function updateUI() {
 function throwBean(targetX, targetY) {
     if (!game.isPlaying || game.throwCooldown > 0) return;
 
-    const startX = canvas.width / 2;
-    const startY = canvas.height - 30;
-    game.beans.push(new Bean(startX, startY, targetX, targetY));
+    // プレイヤーの位置から発射
+    game.beans.push(new Bean(game.player.x, game.player.y - game.player.size, targetX, targetY));
     game.throwCooldown = 100; // ms between throws
+}
+
+// Update player position
+function updatePlayer(dt) {
+    let dx = 0;
+    let dy = 0;
+
+    // Keyboard input
+    if (game.keys.left) dx -= 1;
+    if (game.keys.right) dx += 1;
+    if (game.keys.up) dy -= 1;
+    if (game.keys.down) dy += 1;
+
+    // Joystick input (mobile)
+    if (game.joystick.active) {
+        const jdx = game.joystick.currentX - game.joystick.startX;
+        const jdy = game.joystick.currentY - game.joystick.startY;
+        const jdist = Math.sqrt(jdx * jdx + jdy * jdy);
+        if (jdist > 10) {
+            dx = jdx / jdist;
+            dy = jdy / jdist;
+        }
+    }
+
+    // Normalize diagonal movement
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 0) {
+        dx /= len;
+        dy /= len;
+    }
+
+    // Apply movement
+    game.player.x += dx * game.player.speed * dt;
+    game.player.y += dy * game.player.speed * dt;
+
+    // Clamp to screen bounds
+    const margin = game.player.size;
+    game.player.x = Math.max(margin, Math.min(canvas.width - margin, game.player.x));
+    game.player.y = Math.max(canvas.height * 0.5, Math.min(canvas.height - margin - 10, game.player.y));
+
+    // Update invincibility timer
+    if (game.player.invincible > 0) {
+        game.player.invincible -= dt;
+    }
+}
+
+// Damage player
+function damagePlayer() {
+    if (game.player.invincible > 0) return;
+
+    game.player.hp--;
+    game.player.invincible = 1.5; // 1.5秒の無敵時間
+
+    // Create damage particles
+    for (let i = 0; i < 10; i++) {
+        game.particles.push(new Particle(game.player.x, game.player.y, '#ff0000'));
+    }
+
+    updateUI();
+
+    // Game over if HP is 0
+    if (game.player.hp <= 0) {
+        endGame();
+    }
+}
+
+// Check club collisions with player
+function checkClubCollisions() {
+    for (let club of game.clubs) {
+        if (!club.alive) continue;
+
+        const dx = club.x - game.player.x;
+        const dy = club.y - game.player.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < club.size + game.player.size) {
+            club.alive = false;
+            damagePlayer();
+        }
+    }
 }
 
 // Check collisions
 function checkCollisions() {
+    // Bean vs Oni collisions
     for (let bean of game.beans) {
         if (!bean.alive) continue;
 
@@ -546,7 +744,7 @@ function checkCollisions() {
                 // Respawn oni at new position with current level speed
                 const speedMultiplier = 1 + (game.level - 1) * 0.3;
                 oni.x = Math.random() * (canvas.width - oni.size * 2) + oni.size;
-                oni.y = Math.random() * (canvas.height - oni.size * 2 - 100) + oni.size + 50;
+                oni.y = Math.random() * (canvas.height - oni.size * 2 - 150) + oni.size + 50;
                 oni.vx = (Math.random() - 0.5) * 3 * speedMultiplier;
                 oni.vy = (Math.random() - 0.5) * 2 * speedMultiplier;
 
@@ -554,6 +752,9 @@ function checkCollisions() {
             }
         }
     }
+
+    // Club vs Player collisions
+    checkClubCollisions();
 }
 
 // Game loop
@@ -575,6 +776,9 @@ function gameLoop(timestamp) {
         }
     }
 
+    // Update player
+    updatePlayer(dt);
+
     // Auto-throw when holding
     if (game.isHolding && game.throwCooldown <= 0) {
         throwBean(game.targetX || canvas.width / 2, game.targetY || canvas.height / 2);
@@ -583,6 +787,7 @@ function gameLoop(timestamp) {
     // Update entities
     game.onis.forEach(oni => oni.update(dt));
     game.beans.forEach(bean => bean.update());
+    game.clubs.forEach(club => club.update());
     game.particles.forEach(p => p.update());
     game.scorePopups.forEach(p => p.update());
     game.achievementPopups.forEach(p => p.update(dt));
@@ -592,6 +797,7 @@ function gameLoop(timestamp) {
 
     // Remove dead entities
     game.beans = game.beans.filter(b => b.alive);
+    game.clubs = game.clubs.filter(c => c.alive);
     game.particles = game.particles.filter(p => p.life > 0);
     game.scorePopups = game.scorePopups.filter(p => p.life > 0);
     game.achievementPopups = game.achievementPopups.filter(p => p.life > 0);
@@ -627,6 +833,75 @@ function drawComboMeter() {
     ctx.strokeRect(x, y, meterWidth, meterHeight);
 }
 
+// Draw player character
+function drawPlayer() {
+    ctx.save();
+
+    // Flash when invincible
+    if (game.player.invincible > 0) {
+        ctx.globalAlpha = 0.5 + Math.sin(game.player.invincible * 20) * 0.5;
+    }
+
+    const px = game.player.x;
+    const py = game.player.y;
+    const size = game.player.size;
+
+    // Body (simple human figure)
+    ctx.fillStyle = '#FFE4C4'; // skin color
+    ctx.beginPath();
+    ctx.arc(px, py - size * 0.8, size * 0.6, 0, Math.PI * 2); // head
+    ctx.fill();
+
+    // Hair
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(px, py - size * 1.0, size * 0.5, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    ctx.fillStyle = '#4169E1';
+    ctx.beginPath();
+    ctx.ellipse(px, py, size * 0.5, size * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = 'black';
+    ctx.beginPath();
+    ctx.arc(px - size * 0.2, py - size * 0.85, 2, 0, Math.PI * 2);
+    ctx.arc(px + size * 0.2, py - size * 0.85, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+// Draw HP hearts
+function drawHP() {
+    const heartSize = 20;
+    const startX = 10;
+    const startY = 50;
+
+    for (let i = 0; i < game.player.maxHp; i++) {
+        const x = startX + i * (heartSize + 5);
+
+        if (i < game.player.hp) {
+            // Full heart
+            ctx.fillStyle = '#ff4444';
+        } else {
+            // Empty heart
+            ctx.fillStyle = '#444';
+        }
+
+        // Draw heart shape
+        ctx.beginPath();
+        ctx.moveTo(x + heartSize / 2, startY + heartSize * 0.3);
+        ctx.bezierCurveTo(x + heartSize / 2, startY, x, startY, x, startY + heartSize * 0.3);
+        ctx.bezierCurveTo(x, startY + heartSize * 0.6, x + heartSize / 2, startY + heartSize, x + heartSize / 2, startY + heartSize);
+        ctx.bezierCurveTo(x + heartSize / 2, startY + heartSize, x + heartSize, startY + heartSize * 0.6, x + heartSize, startY + heartSize * 0.3);
+        ctx.bezierCurveTo(x + heartSize, startY, x + heartSize / 2, startY, x + heartSize / 2, startY + heartSize * 0.3);
+        ctx.fill();
+    }
+}
+
 // Draw everything
 function draw() {
     // Clear canvas
@@ -638,23 +913,20 @@ function draw() {
     gradient.addColorStop(0, '#98FB98');
     gradient.addColorStop(1, '#228B22');
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, canvas.height * 0.7, canvas.width, canvas.height * 0.3);
+    ctx.fillRect(0, canvas.height * 0.5, canvas.width, canvas.height * 0.5);
 
     // Draw entities
     game.onis.forEach(oni => oni.draw());
+    game.clubs.forEach(club => club.draw());
     game.beans.forEach(bean => bean.draw());
     game.particles.forEach(p => p.draw());
     game.scorePopups.forEach(p => p.draw());
 
-    // Draw player (bean thrower)
-    ctx.fillStyle = '#8B4513';
-    ctx.beginPath();
-    ctx.arc(canvas.width / 2, canvas.height - 20, 15, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#D2691E';
-    ctx.beginPath();
-    ctx.arc(canvas.width / 2 - 3, canvas.height - 23, 5, 0, Math.PI * 2);
-    ctx.fill();
+    // Draw player
+    drawPlayer();
+
+    // Draw HP
+    drawHP();
 
     // Draw combo meter
     drawComboMeter();
@@ -692,7 +964,7 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 canvas.addEventListener('mousemove', (e) => {
-    if (!game.isPlaying || !game.isHolding) return;
+    if (!game.isPlaying) return;
     const pos = getCanvasPosition(e);
     game.targetX = pos.x;
     game.targetY = pos.y;
@@ -706,41 +978,108 @@ canvas.addEventListener('mouseleave', () => {
     game.isHolding = false;
 });
 
-// Touch events
+// Touch events - left side for movement, right side for aiming/throwing
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
     if (!game.isPlaying) return;
-    const pos = getCanvasPosition(e);
-    game.isHolding = true;
-    game.targetX = pos.x;
-    game.targetY = pos.y;
-    throwBean(pos.x, pos.y);
+
+    for (let touch of e.changedTouches) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const x = (touch.clientX - rect.left) * scaleX;
+        const y = (touch.clientY - rect.top) * (canvas.height / rect.height);
+
+        if (x < canvas.width / 2) {
+            // Left side - joystick for movement
+            game.joystick.active = true;
+            game.joystick.startX = x;
+            game.joystick.startY = y;
+            game.joystick.currentX = x;
+            game.joystick.currentY = y;
+            game.joystick.touchId = touch.identifier;
+        } else {
+            // Right side - aim and throw
+            game.isHolding = true;
+            game.targetX = x;
+            game.targetY = y;
+            game.aimTouchId = touch.identifier;
+            throwBean(x, y);
+        }
+    }
 });
 
 canvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
     if (!game.isPlaying) return;
-    const pos = getCanvasPosition(e);
-    game.targetX = pos.x;
-    game.targetY = pos.y;
+
+    for (let touch of e.changedTouches) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const x = (touch.clientX - rect.left) * scaleX;
+        const y = (touch.clientY - rect.top) * (canvas.height / rect.height);
+
+        if (touch.identifier === game.joystick.touchId) {
+            game.joystick.currentX = x;
+            game.joystick.currentY = y;
+        }
+        if (touch.identifier === game.aimTouchId) {
+            game.targetX = x;
+            game.targetY = y;
+        }
+    }
 });
 
 canvas.addEventListener('touchend', (e) => {
     e.preventDefault();
-    game.isHolding = false;
+
+    for (let touch of e.changedTouches) {
+        if (touch.identifier === game.joystick.touchId) {
+            game.joystick.active = false;
+        }
+        if (touch.identifier === game.aimTouchId) {
+            game.isHolding = false;
+        }
+    }
 });
 
 // Keyboard events
 document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && game.isPlaying && !e.repeat) {
+    if (!game.isPlaying) return;
+
+    // Movement keys
+    if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+        game.keys.up = true;
+        e.preventDefault();
+    }
+    if (e.code === 'KeyS' || e.code === 'ArrowDown') {
+        game.keys.down = true;
+        e.preventDefault();
+    }
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+        game.keys.left = true;
+        e.preventDefault();
+    }
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+        game.keys.right = true;
+        e.preventDefault();
+    }
+
+    // Throw with space
+    if (e.code === 'Space' && !e.repeat) {
         game.isHolding = true;
-        game.targetX = canvas.width / 2;
-        game.targetY = canvas.height / 2;
-        throwBean(game.targetX, game.targetY);
+        // Throw towards mouse position or center
+        throwBean(game.targetX || canvas.width / 2, game.targetY || 0);
+        e.preventDefault();
     }
 });
 
 document.addEventListener('keyup', (e) => {
+    // Movement keys
+    if (e.code === 'KeyW' || e.code === 'ArrowUp') game.keys.up = false;
+    if (e.code === 'KeyS' || e.code === 'ArrowDown') game.keys.down = false;
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') game.keys.left = false;
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') game.keys.right = false;
+
     if (e.code === 'Space') {
         game.isHolding = false;
     }
