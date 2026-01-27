@@ -11,11 +11,11 @@
 
 **[Play Now on GitHub Pages](https://rsasaki0109.github.io/throw_beans_at_the_oni/)**
 
-![Game Screenshot](screenshot.png)
+![Gameplay](gameplay.gif)
 
 ## Overview
 
-A Japanese Setsubun festival mini-game for Roblox. Throw beans at the Oni in 10 seconds and compete for the highest score!
+A Japanese Setsubun festival action game. Move around, dodge the Oni's club attacks, and throw beans to defeat them!
 
 | Item | Description |
 |------|-------------|
@@ -26,10 +26,12 @@ A Japanese Setsubun festival mini-game for Roblox. Throw beans at the Oni in 10 
 ## Features
 
 - 10-second fast-paced gameplay
-- PC: Mouse click / Space key
-- Mobile: Tap to throw, hold for continuous fire
-- Auto-restart after result screen
-- Score popup and hit effects
+- Player movement with WASD / Arrow keys
+- Oni throws clubs at player - dodge to survive!
+- HP system (3 hearts) - game over when HP reaches 0
+- Combo system with score multipliers
+- Achievements and high score tracking
+- PC and mobile support
 
 ## Project Structure
 
@@ -94,9 +96,9 @@ In Roblox Studio, connect via the Rojo plugin.
 
 | Action | PC | Mobile |
 |--------|-----|--------|
-| Aim | Mouse | Touch position |
-| Throw | Left Click / Space | Tap |
-| Rapid Fire | Hold | Hold |
+| Move | WASD / Arrow Keys | Left side (virtual joystick) |
+| Aim & Throw | Click | Right side tap |
+| Rapid Fire | Hold click | Hold tap |
 
 ## Scoring
 
